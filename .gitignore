@@ -1,0 +1,69 @@
+# =============================================================================
+# NetLLM / automated_penetration_test — what to track vs ignore
+#
+# TRACK (upload to GitHub): Python source, config, docs, small tooling scripts.
+# IGNORE: checkpoints, logs, datasets, eval JSON, HuggingFace caches, secrets.
+# On RunPod: clone repo, upload exp_pool.pkl / HF token separately (not in git).
+# =============================================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# --- Virtual envs ---
+.venv/
+venv/
+env/
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Secrets (never commit) ---
+.env
+.env.*
+*.pem
+hf_token.txt
+
+# --- Training & fine-tuning outputs (large) ---
+artifacts/ft_plms/
+
+# --- Evaluation dumps ---
+artifacts/results/
+
+# --- Offline experience pools (binary; upload via object storage / scp) ---
+artifacts/exp_pools/**/*.pkl
+
+# --- Weight files under artifacts (catch strays outside ft_plms/) ---
+artifacts/**/*.bin
+artifacts/**/*.pt
+artifacts/**/*.pth
+artifacts/**/*.ckpt
+artifacts/**/*.safetensors
+
+# --- Training logs (huge text) ---
+**/train_losses.txt
+**/console.log
+*.log
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Optional experiment trackers ---
+wandb/
+
+# --- HuggingFace / torch cache (if ever created under project root) ---
+.cache/
+models--*/
