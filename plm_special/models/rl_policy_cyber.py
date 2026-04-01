@@ -101,6 +101,8 @@ class CyberOfflineRLPolicy(nn.Module):
         stacked = torch.cat(stacked, dim=0).unsqueeze(0)  # (1, 3T, E)
         stacked = stacked[:, -self.plm_embed_size :, :]
         stacked = self.embed_ln(stacked)
+        plm_dtype = next(self.plm.parameters()).dtype
+        stacked = stacked.to(dtype=plm_dtype)
 
         if attention_mask is None:
             attention_mask = torch.ones((stacked.shape[0], stacked.shape[1]), dtype=torch.long, device=self.device)
@@ -124,6 +126,7 @@ class CyberOfflineRLPolicy(nn.Module):
         pos = torch.as_tensor(action_positions - offset, device=self.device)
         pos = torch.clamp(pos, 0, L - 1)
         logits_used = h[:, pos]  # (1,T,E)
+        logits_used = logits_used.to(dtype=self.action_head.weight.dtype)
         logits = self.action_head(logits_used)  # (1,T,A)
         return logits
 
@@ -155,6 +158,8 @@ class CyberOfflineRLPolicy(nn.Module):
             stacked = torch.cat((r_emb, s_emb), dim=1)  # (1,2,E)
 
         stacked = self.embed_ln(stacked)
+        plm_dtype = next(self.plm.parameters()).dtype
+        stacked = stacked.to(dtype=plm_dtype)
         attn = torch.ones((1, stacked.shape[1]), dtype=torch.long, device=self.device)
         plm_kwargs = dict(
             inputs_embeds=stacked,
@@ -167,6 +172,7 @@ class CyberOfflineRLPolicy(nn.Module):
         except TypeError:
             out = self.plm(**plm_kwargs)
         h = out["last_hidden_state"][:, -1:]  # (1,1,E)
+        h = h.to(dtype=self.action_head.weight.dtype)
         logits = self.action_head(h).reshape(-1)  # (A,)
 
         if action_mask is not None:
