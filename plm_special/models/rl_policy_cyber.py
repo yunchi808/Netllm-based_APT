@@ -62,9 +62,20 @@ class CyberOfflineRLPolicy(nn.Module):
 
     def _plm_input_dtype(self) -> torch.dtype:
         """Get the base PLM compute dtype (robust with PEFT wrappers)."""
+        if hasattr(self.plm, "get_input_embeddings"):
+            try:
+                emb = self.plm.get_input_embeddings()
+                if emb is not None and hasattr(emb, "weight"):
+                    return emb.weight.dtype
+            except Exception:
+                pass
         if hasattr(self.plm, "get_base_model"):
             try:
                 base = self.plm.get_base_model()
+                if hasattr(base, "get_input_embeddings"):
+                    emb = base.get_input_embeddings()
+                    if emb is not None and hasattr(emb, "weight"):
+                        return emb.weight.dtype
                 return next(base.parameters()).dtype
             except Exception:
                 pass
