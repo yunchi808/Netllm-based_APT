@@ -60,6 +60,16 @@ class CyberOfflineRLPolicy(nn.Module):
         self.returns_dq: deque[torch.Tensor] = deque(maxlen=max_length)
         self.actions_dq: deque[torch.Tensor] = deque(maxlen=max_length)
 
+    def _plm_input_dtype(self) -> torch.dtype:
+        """Get the base PLM compute dtype (robust with PEFT wrappers)."""
+        if hasattr(self.plm, "get_base_model"):
+            try:
+                base = self.plm.get_base_model()
+                return next(base.parameters()).dtype
+            except Exception:
+                pass
+        return next(self.plm.parameters()).dtype
+
     def clear_dq(self) -> None:
         """Clear rollout token history (call at each env.reset)."""
         self.states_dq.clear()
@@ -101,7 +111,7 @@ class CyberOfflineRLPolicy(nn.Module):
         stacked = torch.cat(stacked, dim=0).unsqueeze(0)  # (1, 3T, E)
         stacked = stacked[:, -self.plm_embed_size :, :]
         stacked = self.embed_ln(stacked)
-        plm_dtype = next(self.plm.parameters()).dtype
+        plm_dtype = self._plm_input_dtype()
         stacked = stacked.to(dtype=plm_dtype)
 
         if attention_mask is None:
@@ -158,7 +168,7 @@ class CyberOfflineRLPolicy(nn.Module):
             stacked = torch.cat((r_emb, s_emb), dim=1)  # (1,2,E)
 
         stacked = self.embed_ln(stacked)
-        plm_dtype = next(self.plm.parameters()).dtype
+        plm_dtype = self._plm_input_dtype()
         stacked = stacked.to(dtype=plm_dtype)
         attn = torch.ones((1, stacked.shape[1]), dtype=torch.long, device=self.device)
         plm_kwargs = dict(
