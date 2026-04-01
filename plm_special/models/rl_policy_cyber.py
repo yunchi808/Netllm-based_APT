@@ -134,10 +134,12 @@ class CyberOfflineRLPolicy(nn.Module):
             use_cache=False,
             output_hidden_states=True,
         )
-        try:
-            outputs = self.plm(**plm_kwargs, stop_layer_idx=self.which_layer)
-        except TypeError:
-            outputs = self.plm(**plm_kwargs)
+        use_autocast = self.device.startswith("cuda") and plm_dtype in (torch.float16, torch.bfloat16)
+        with torch.autocast(device_type="cuda", dtype=plm_dtype, enabled=use_autocast):
+            try:
+                outputs = self.plm(**plm_kwargs, stop_layer_idx=self.which_layer)
+            except TypeError:
+                outputs = self.plm(**plm_kwargs)
         h = outputs["last_hidden_state"]  # (1, L, E)
 
         # map action_positions into truncated sequence coordinates
@@ -188,10 +190,12 @@ class CyberOfflineRLPolicy(nn.Module):
             use_cache=False,
             output_hidden_states=True,
         )
-        try:
-            out = self.plm(**plm_kwargs, stop_layer_idx=self.which_layer)
-        except TypeError:
-            out = self.plm(**plm_kwargs)
+        use_autocast = self.device.startswith("cuda") and plm_dtype in (torch.float16, torch.bfloat16)
+        with torch.autocast(device_type="cuda", dtype=plm_dtype, enabled=use_autocast):
+            try:
+                out = self.plm(**plm_kwargs, stop_layer_idx=self.which_layer)
+            except TypeError:
+                out = self.plm(**plm_kwargs)
         h = out["last_hidden_state"][:, -1:]  # (1,1,E)
         h = h.to(dtype=self.action_head.weight.dtype)
         logits = self.action_head(h).reshape(-1)  # (A,)
