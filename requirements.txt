@@ -1,0 +1,27 @@
+# Python deps for NetLLM-based APT (training + cyber env).
+#
+# GPU / CUDA: install PyTorch first from https://pytorch.org/get-started/locally/
+#   e.g. pip install torch --index-url https://download.pytorch.org/whl/cu124
+# Then: pip install -r requirements.txt
+#
+# Core ML (Hugging Face stack; versions kept compatible with common Llama + LoRA flows)
+torch>=2.1.0
+transformers>=4.36.0
+peft>=0.7.0
+accelerate>=0.25.0
+safetensors>=0.4.0
+sentencepiece>=0.1.99
+
+# Numerics / RL env (gym 0.26.x + numpy<2 avoids common deprecation warnings)
+numpy>=1.24.0,<2.0
+gym==0.26.2
+
+# Cyber sim (networkx 3+ moved convert_matrix; pin for cyberbattle_env imports)
+networkx==2.8.8
+boolean.py>=4.0
+typing_extensions>=4.5.0
+
+# Viz / optional sim features (plotly is imported at module load in cyberbattle_env)
+plotly>=5.18.0
+matplotlib>=3.7.0
+PyYAML>=6.0
