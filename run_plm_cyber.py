@@ -27,13 +27,47 @@ from plm_special.utils.dt_reward import make_dt_process_reward
 def _infer_plm_type(plm_path: str, plm) -> str:
     """Infer plm_type from path or config for LoRA target_modules. Lazy-imports low_rank."""
     from plm_special.models.low_rank import TARGET_MODULES
+
     cfg = getattr(plm, "config", None)
-    model_type = getattr(cfg, "model_type", None) if cfg else None
+    model_type = (getattr(cfg, "model_type", None) or "").lower() if cfg else ""
     path_lower = str(plm_path).lower()
+
     if model_type and model_type in TARGET_MODULES:
+        # HF Llama 3 often still reports model_type='llama'; use path to pick llama3 key (same LoRA modules).
+        if model_type == "llama" and ("llama-3" in path_lower or "llama3" in path_lower):
+            return "llama3"
         return model_type
-    for k in ("llama", "mistral", "gpt2", "opt", "t5"):
-        if k in path_lower or (model_type and k in (model_type or "").lower()):
+
+    # Path heuristics (order: more specific substrings first)
+    path_rules = (
+        ("qwen3", "qwen3"),
+        ("qwen2.5", "qwen2"),
+        ("qwen2", "qwen2"),
+        ("qwen", "qwen2"),
+        ("gemma-2", "gemma2"),
+        ("gemma2", "gemma2"),
+        ("gemma", "gemma"),
+        ("deepseek-v3", "deepseek_v3"),
+        ("deepseek_v3", "deepseek_v3"),
+        ("deepseek-v2", "deepseek_v2"),
+        ("deepseek_v2", "deepseek_v2"),
+        ("deepseek", "deepseek"),
+        ("llama-3", "llama3"),
+        ("llama3", "llama3"),
+        ("llava", "llava"),
+        ("mistral", "mistral"),
+        ("mixtral", "mistral"),
+        ("opt-", "opt"),
+        ("/opt/", "opt"),
+        ("gpt2", "gpt2"),
+        ("llama", "llama"),
+    )
+    for needle, key in path_rules:
+        if needle in path_lower and key in TARGET_MODULES:
+            return key
+
+    for k in ("mistral", "gpt2", "opt", "t5"):
+        if k in path_lower or (model_type and k in model_type):
             if k == "t5":
                 return "t5-lm"
             return k
@@ -127,16 +161,18 @@ def run(args):
         exp_dataset=exp_dataset,
         device=args.device,
         action_dim=args.action_dim,
+        batch_size=args.batch_size,
         grad_accum_steps=args.grad_accum_steps,
         lr_scheduler=lr_scheduler,
     )
 
     ft_dir = cfg.ft_plms_dir
+    _bs_prefix = f"bs{args.batch_size}_" if args.batch_size > 1 else ""
     models_dir = os.path.join(
         ft_dir,
         f"cyber_{os.path.basename(str(plm_path))}",
         f"action_dim_{args.action_dim}_state_dim_{args.state_dim}_sfd_{args.state_feature_dim}",
-        f"rank_{args.rank}_w_{args.w}_gamma_{args.gamma}_lr_{args.lr}_wd_{args.weight_decay}_warm_{args.warmup_steps}_epochs_{args.num_epochs}_seed_{args.seed}",
+        f"{_bs_prefix}rank_{args.rank}_w_{args.w}_gamma_{args.gamma}_lr_{args.lr}_wd_{args.weight_decay}_warm_{args.warmup_steps}_epochs_{args.num_epochs}_seed_{args.seed}",
     )
     checkpoint_dir = os.path.join(models_dir, "checkpoint")
     best_model_dir = os.path.join(models_dir, "best_model")
@@ -248,6 +284,12 @@ if __name__ == "__main__":
     parser.add_argument("--eval-episodes", type=int, default=10, help="Number of episodes per evaluation")
     parser.add_argument("--eval-max-steps", type=int, default=cfg.eval_max_steps_default, help="Max steps per episode in evaluation")
     parser.add_argument("--grad-accum-steps", dest="grad_accum_steps", type=int, default=32)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="Training micro-batch size (B>1 increases VRAM; grad-accum still merges B*steps for optimizer).",
+    )
     parser.add_argument("--seed", type=int, default=100003)
 
     parser.add_argument("--step-cost", type=float, default=cfg.step_cost, help="Env step cost for evaluation")

@@ -7,14 +7,29 @@ import torch
 import torch.nn as nn
 from peft import LoraConfig, get_peft_model, TaskType
 
-# Module names per architecture for LoRA target_modules
+# Module names per architecture for LoRA target_modules (HF module *suffix* names).
+# Llama 2/3/Mistral-style: q/v only (matches original ABR-style APT defaults).
+# Qwen2/Gemma-style: full attention linears (common in recent fine-tuning recipes).
+# DeepSeek-V2/V3 MLA: query path is either q_proj or q_b_proj depending on config; list both so PEFT binds to what exists.
 TARGET_MODULES = {
     "llama": ["q_proj", "v_proj"],
+    "llama3": ["q_proj", "v_proj"],
     "llava": ["q_proj", "v_proj"],
     "mistral": ["q_proj", "v_proj"],
     "opt": ["q_proj", "v_proj"],
     "gpt2": ["c_attn"],
     "t5-lm": ["q", "v"],
+    # Qwen2 / Qwen2.5 / Qwen3 (HF model_type often qwen2 / qwen3)
+    "qwen2": ["q_proj", "k_proj", "v_proj", "o_proj"],
+    "qwen3": ["q_proj", "k_proj", "v_proj", "o_proj"],
+    # Gemma / Gemma 2
+    "gemma": ["q_proj", "k_proj", "v_proj", "o_proj"],
+    "gemma2": ["q_proj", "k_proj", "v_proj", "o_proj"],
+    # DeepSeek LLM (older Llama-like checkpoints, HF model_type may be deepseek)
+    "deepseek": ["q_proj", "v_proj"],
+    # DeepSeek-V2 / V3 MLA (transformers modeling_deepseek_v2)
+    "deepseek_v2": ["q_proj", "q_b_proj", "kv_b_proj", "o_proj"],
+    "deepseek_v3": ["q_proj", "q_b_proj", "kv_b_proj", "o_proj"],
 }
 
 

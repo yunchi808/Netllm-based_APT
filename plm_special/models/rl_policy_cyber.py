@@ -89,37 +89,27 @@ class CyberOfflineRLPolicy(nn.Module):
 
     def forward(self, states, actions_in, returns, timesteps, attention_mask=None):
         """
-        states:     (1, T, state_dim)
-        actions_in: (1, T, 1) normalized
-        returns:    (1, T, 1)
-        timesteps:  (1, T)
-        output: logits (1, T, action_dim)
+        states:     (B, T, state_dim)
+        actions_in: (B, T, 1) normalized
+        returns:    (B, T, 1)
+        timesteps:  (B, T)
+        output: logits (B, T, action_dim)
         """
-        assert states.shape[0] == 1, "batch size should be 1 to avoid CUDA memory exceed"
-
         states = states.to(self.device)
         actions_in = actions_in.to(self.device)
         returns = returns.to(self.device)
         timesteps = timesteps.to(self.device)
 
-        time_emb = self.embed_timestep(timesteps)  # (1,T,E)
+        time_emb = self.embed_timestep(timesteps)  # (B,T,E)
         r_emb = self.embed_return(returns) + time_emb
         a_emb = self.embed_action(actions_in) + time_emb
 
-        s_feat = self.state_encoder(states)  # (1,T,F)
+        s_feat = self.state_encoder(states)  # (B,T,F)
         s_emb = self.embed_state(s_feat) + time_emb
 
-        # stack as (R_t, S_t, A_t) for each t
-        stacked = []
-        action_positions = np.zeros(r_emb.shape[1], dtype=np.int64)
-        for i in range(r_emb.shape[1]):
-            block = torch.cat((r_emb[0, i : i + 1], s_emb[0, i : i + 1], a_emb[0, i : i + 1]), dim=0)
-            stacked.append(block)
-            # positions in each triple: [0]=R, [1]=S, [2]=A
-            # IMPORTANT: predict A_i from S_i representation (ABR-style),
-            # so the model cannot "peek" at the current action token A_i.
-            action_positions[i] = (i + 1) * 3 - 2  # index of S in flattened sequence
-        stacked = torch.cat(stacked, dim=0).unsqueeze(0)  # (1, 3T, E)
+        # Flatten (R_t, S_t, A_t) per timestep -> (B, 3T, E); order matches prior loop:
+        # R_0,S_0,A_0, R_1,S_1,A_1, ...
+        stacked = torch.stack((r_emb, s_emb, a_emb), dim=2).reshape(states.shape[0], 3 * r_emb.shape[1], -1)
         stacked = stacked[:, -self.plm_embed_size :, :]
         stacked = self.embed_ln(stacked)
         plm_dtype = self._plm_input_dtype()
@@ -140,17 +130,19 @@ class CyberOfflineRLPolicy(nn.Module):
                 outputs = self.plm(**plm_kwargs, stop_layer_idx=self.which_layer)
             except TypeError:
                 outputs = self.plm(**plm_kwargs)
-        h = outputs["last_hidden_state"]  # (1, L, E)
+        h = outputs["last_hidden_state"]  # (B, L, E)
 
-        # map action_positions into truncated sequence coordinates
+        T = r_emb.shape[1]
+        full_L = 3 * T
+        # index of S_i in the full (pre-truncate) token sequence: (i+1)*3 - 2
+        action_positions = torch.arange(T, device=self.device, dtype=torch.long) * 3 + 1
         L = h.shape[1]
-        full_L = 3 * r_emb.shape[1]
         offset = max(full_L - L, 0)
-        pos = torch.as_tensor(action_positions - offset, device=self.device)
+        pos = action_positions - offset
         pos = torch.clamp(pos, 0, L - 1)
-        logits_used = h[:, pos]  # (1,T,E)
+        logits_used = h[:, pos, :]  # (B,T,E)
         logits_used = logits_used.to(dtype=self.action_head.weight.dtype)
-        logits = self.action_head(logits_used)  # (1,T,A)
+        logits = self.action_head(logits_used)  # (B,T,A)
         return logits
 
     def sample(self, state, target_return, timestep, action_mask=None):

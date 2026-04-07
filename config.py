@@ -48,7 +48,22 @@ EVAL_MAX_STEPS_DEFAULT = 600
 # PLM / LoRA
 # ---------------------------------------------------------------------------
 # When --plm-type is not "auto", it must be one of these (LoRA target_modules mapping).
-PLM_TYPES = ("gpt2", "llama", "llava", "t5-lm", "opt", "mistral")
+PLM_TYPES = (
+    "gpt2",
+    "llama",
+    "llama3",
+    "llava",
+    "t5-lm",
+    "opt",
+    "mistral",
+    "qwen2",
+    "qwen3",
+    "gemma",
+    "gemma2",
+    "deepseek",
+    "deepseek_v2",
+    "deepseek_v3",
+)
 
 
 def _default_exp_pool_paths() -> Dict[str, str]:

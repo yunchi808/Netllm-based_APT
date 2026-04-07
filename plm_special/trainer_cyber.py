@@ -4,7 +4,7 @@ import torch
 
 from torch.utils.data import DataLoader
 
-from plm_special.utils.utils_cyber import masked_cross_entropy_loss, process_batch_cyber
+from plm_special.utils.utils_cyber import collate_cyber_experience, masked_cross_entropy_loss, process_batch_cyber
 
 
 class CyberTrainer:
@@ -18,7 +18,13 @@ class CyberTrainer:
         self.batch_size = batch_size
         self.grad_accum_steps = grad_accum_steps
         self.lr_scheduler = lr_scheduler
-        self.dataloader = DataLoader(exp_dataset, batch_size, shuffle=True, pin_memory=True)
+        self.dataloader = DataLoader(
+            exp_dataset,
+            batch_size,
+            shuffle=True,
+            pin_memory=True,
+            collate_fn=collate_cyber_experience,
+        )
 
     def train_epoch(self, report_loss_per_steps=100):
         train_losses = []
@@ -50,7 +56,7 @@ class CyberTrainer:
 
     def train_step(self, batch):
         states, actions_in, returns, timesteps, labels, masks = process_batch_cyber(batch, device=self.device, action_dim=self.action_dim)
-        logits = self.model(states, actions_in, returns, timesteps)  # (1,T,A)
+        logits = self.model(states, actions_in, returns, timesteps)  # (B,T,A)
         loss = masked_cross_entropy_loss(logits, labels, masks)
         return loss
 
