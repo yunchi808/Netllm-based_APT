@@ -130,7 +130,15 @@ def run(args):
     if args.rank > 0:
         from plm_special.models.low_rank import peft_model
         plm_type = args.plm_type if args.plm_type != "auto" else _infer_plm_type(plm_path, plm)
-        plm = peft_model(plm, plm_type, args.rank, print_trainable=True)
+        plm = peft_model(
+            plm,
+            plm_type,
+            args.rank,
+            print_trainable=True,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=args.lora_dropout,
+            target_preset=args.lora_target,
+        )
 
     # Prefer the actual loaded model hidden size to avoid cfg/model mismatches
     plm_embed_size = getattr(getattr(plm, "config", None), "hidden_size", None)
@@ -278,6 +286,25 @@ if __name__ == "__main__":
     )
     parser.add_argument("--rank", type=int, default=-1)
     parser.add_argument("--which-layer", type=int, default=-1)
+    parser.add_argument(
+        "--lora-target",
+        type=str,
+        default="default",
+        choices=("default", "attn_qv", "attn_qkvo", "attn_qkvo_mlp"),
+        help="LoRA target preset when --rank > 0. 'default' uses architecture mapping in low_rank.py.",
+    )
+    parser.add_argument(
+        "--lora-alpha",
+        type=int,
+        default=None,
+        help="LoRA alpha. If omitted, defaults to rank.",
+    )
+    parser.add_argument(
+        "--lora-dropout",
+        type=float,
+        default=0.05,
+        help="LoRA dropout.",
+    )
 
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
