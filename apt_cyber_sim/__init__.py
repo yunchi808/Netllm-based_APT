@@ -22,7 +22,6 @@ from gym.envs.registration import registry, register as gym_register
 from config import cfg  # noqa: E402
 
 from ._env.cyberbattle_env import AttackerGoal, DefenderGoal
-from .samples.toyctf import toy_ctf
 def _is_registered(env_id: str) -> bool:
     # gym<=0.21 had registry.env_specs, gym>=0.26 uses registry as dict-like
     if hasattr(registry, "env_specs"):  # pragma: no cover
@@ -31,23 +30,30 @@ def _is_registered(env_id: str) -> bool:
 
 
 def ensure_registered():
-    """Register the ToyCTF env used by APT evaluation."""
-    if _is_registered(cfg.env_id):
-        return
+    """Register APT cyber environments used by training/evaluation."""
+    common_kwargs = {
+        "defender_agent": None,
+        "attacker_goal": AttackerGoal(own_atleast_percent=cfg.ownership_goal),
+        "defender_goal": DefenderGoal(eviction=True),
+        "step_cost": cfg.step_cost,
+        "winning_reward": cfg.winning_reward,
+        "maximum_node_count": cfg.maximum_node_count,
+    }
 
-    # Defaults from automated_penetration_test.config (aligned with offline CSV generation).
-    gym_register(
-        id=cfg.env_id,
-        entry_point="apt_cyber_sim._env.cyberbattle_toyctf:CyberBattleToyCtf",
-        kwargs={
-            "defender_agent": None,
-            "attacker_goal": AttackerGoal(own_atleast_percent=cfg.ownership_goal),
-            "defender_goal": DefenderGoal(eviction=True),
-            "step_cost": cfg.step_cost,
-            "winning_reward": cfg.winning_reward,
-            "maximum_node_count": cfg.maximum_node_count,
-        },
-    )
+    env_specs = {
+        "AptCyberBattleToyCtf-v0": "apt_cyber_sim._env.cyberbattle_toyctf:CyberBattleToyCtf",
+        "AptCyberBattleNode10V1-v0": "apt_cyber_sim._env.cyberbattle_node10_v1:CyberBattleNode10V1",
+        "AptCyberBattleNode10V2-v0": "apt_cyber_sim._env.cyberbattle_node10_v2:CyberBattleNode10V2",
+        "AptCyberBattleNode10V3-v0": "apt_cyber_sim._env.cyberbattle_node10_v3:CyberBattleNode10V3",
+    }
+    for env_id, entry_point in env_specs.items():
+        if _is_registered(env_id):
+            continue
+        gym_register(
+            id=env_id,
+            entry_point=entry_point,
+            kwargs=common_kwargs,
+        )
 
 
 # Register on import for convenience (mirrors upstream behavior)

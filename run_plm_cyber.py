@@ -98,6 +98,28 @@ def _resolve_exp_pool_path(args) -> str:
     raise ValueError("Specify --exp-pool-path or --exp-pool (see config.cfg.exp_pool_paths).")
 
 
+def _parse_eval_env_ids(args) -> list[str]:
+    """Parse multi-env evaluation ids for training-time validation."""
+    raw = getattr(args, "eval_env_ids", None)
+    if not raw:
+        return [str(getattr(args, "env_id", cfg.env_id)).strip()]
+    env_ids = [x.strip() for x in str(raw).split(",") if x.strip()]
+    return env_ids or [str(getattr(args, "env_id", cfg.env_id)).strip()]
+
+
+def _aggregate_eval_returns(per_env_logs: dict) -> dict:
+    """Aggregate returns across environments for checkpoint selection."""
+    env_ids = list(per_env_logs.keys())
+    sums = [float(per_env_logs[e]["episodes_return"]) for e in env_ids]
+    means = [float(per_env_logs[e]["mean_return_per_episode"]) for e in env_ids]
+    return {
+        "env_ids": env_ids,
+        "episodes_return_mean": float(np.mean(sums)) if sums else float("-inf"),
+        "episodes_return_min": float(np.min(sums)) if sums else float("-inf"),
+        "mean_return_per_episode_mean": float(np.mean(means)) if means else float("-inf"),
+    }
+
+
 def run(args):
     exp_pool = pickle.load(open(args.exp_pool_path, "rb"))
 
@@ -223,23 +245,33 @@ def run(args):
             print("Checkpoint saved at:", ckpt_dir)
 
         if epoch % args.eval_per_epoch == 0:
-            eval_logs = evaluate_on_env_cyber(
-                args,
-                model,
-                target_return=target_return,
-                max_ep_num=args.eval_episodes,
-                eval_max_steps=args.eval_max_steps,
-                process_reward_fn=dt_process_reward,
-            )
-            episodes_return = eval_logs["episodes_return"]
-            if best_eval_return < episodes_return:
-                best_eval_return = episodes_return
+            per_env_logs = {}
+            for env_id in args._eval_env_ids:
+                env_logs = evaluate_on_env_cyber(
+                    args,
+                    model,
+                    target_return=target_return,
+                    max_ep_num=args.eval_episodes,
+                    eval_max_steps=args.eval_max_steps,
+                    process_reward_fn=dt_process_reward,
+                    env_id=env_id,
+                )
+                per_env_logs[env_id] = env_logs
+                print(">" * 10, f"Evaluation Information [env={env_id}]")
+                pprint(env_logs)
+
+            agg = _aggregate_eval_returns(per_env_logs)
+            if args.model_select_metric == "mean":
+                score = agg["episodes_return_mean"]
+            else:
+                score = agg["episodes_return_min"]
+            if best_eval_return < score:
+                best_eval_return = score
                 save_model(args, model, best_model_dir)
                 print("Best model saved at:", best_model_dir)
 
-            eval_logs["best_return"] = best_eval_return
-            print(">" * 10, "Evaluation Information")
-            pprint(eval_logs)
+            print(">" * 10, "Evaluation Aggregate")
+            pprint({"metric": args.model_select_metric, "score": score, "best_score": best_eval_return, **agg})
 
     np.savetxt(os.path.join(models_dir, "train_losses.txt"), np.array(all_losses, dtype=np.float32), fmt="%.6f")
     print("Done. Best eval return:", best_eval_return)
@@ -328,6 +360,25 @@ if __name__ == "__main__":
     parser.add_argument("--winning-reward", type=int, default=cfg.winning_reward, help="Env winning reward for evaluation")
     parser.add_argument("--ownership-goal", type=float, default=cfg.ownership_goal, help="Env ownership goal for evaluation")
     parser.add_argument("--maximum-node-count", type=int, default=cfg.maximum_node_count, help="Env max node count for evaluation")
+    parser.add_argument(
+        "--env-id",
+        type=str,
+        default=cfg.env_id,
+        help="Single evaluation environment id during training.",
+    )
+    parser.add_argument(
+        "--eval-env-ids",
+        type=str,
+        default=None,
+        help="Comma-separated env ids for multi-env validation during training.",
+    )
+    parser.add_argument(
+        "--model-select-metric",
+        type=str,
+        default="mean",
+        choices=("mean", "min"),
+        help="Best-model selection over multiple envs: mean or min of episodes_return.",
+    )
 
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--device-out", dest="device_out", default=None)
@@ -340,6 +391,7 @@ if __name__ == "__main__":
     if args.device_out is None:
         args.device_out = args.device
     args.exp_pool_path = _resolve_exp_pool_path(args)
+    args._eval_env_ids = _parse_eval_env_ids(args)
     print("Arguments:")
     pprint(args)
     run(args)

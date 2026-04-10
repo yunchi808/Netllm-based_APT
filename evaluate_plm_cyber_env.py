@@ -44,6 +44,45 @@ def _resolve_exp_pool_path_optional(args) -> Optional[str]:
     return None
 
 
+def _parse_env_ids(args) -> list[str]:
+    """Resolve evaluation env ids from args."""
+    env_ids: list[str] = []
+    raw = getattr(args, "env_ids", None)
+    if raw:
+        for part in str(raw).split(","):
+            item = part.strip()
+            if item:
+                env_ids.append(item)
+    elif getattr(args, "env_id", None):
+        env_ids.append(str(args.env_id).strip())
+    else:
+        env_ids.append(cfg.env_id)
+    return env_ids
+
+
+def _aggregate_multi_env_eval(per_env: dict) -> dict:
+    """Aggregate multi-environment metrics for quick comparison."""
+    if not per_env:
+        return {}
+    env_ids = list(per_env.keys())
+    mean_returns = [float(per_env[e]["summary"]["mean_return"]) for e in env_ids]
+    done_early_rates = []
+    for e in env_ids:
+        s = per_env[e]["summary"]
+        episodes = max(int(s.get("episodes", 0)), 1)
+        done_early = int(s.get("episodes_done_early", 0))
+        done_early_rates.append(done_early / episodes)
+    return {
+        "env_count": len(env_ids),
+        "env_ids": env_ids,
+        "mean_return_avg": float(np.mean(mean_returns)),
+        "mean_return_min": float(np.min(mean_returns)),
+        "mean_return_max": float(np.max(mean_returns)),
+        "mean_return_std": float(np.std(mean_returns)),
+        "done_early_rate_avg": float(np.mean(done_early_rates)),
+    }
+
+
 def apply_run_plm_cyber_eval_alignment(args) -> None:
     """
     Set ``args.target_return`` and ``args._dt_process_reward_fn`` to match ``run_plm_cyber``:
@@ -225,6 +264,7 @@ def evaluate_on_env_cyber(
     max_ep_num: int,
     eval_max_steps: int | None = None,
     process_reward_fn: Callable[[float], float] | None = None,
+    env_id: str | None = None,
 ):
     """
     Run the given policy in the cyber sim for max_ep_num episodes (ABR-style).
@@ -257,7 +297,7 @@ def evaluate_on_env_cyber(
     np.random.seed(eval_seed)
 
     env = gym.make(
-        cfg.env_id,
+        env_id or cfg.env_id,
         disable_env_checker=True,
         attacker_goal=apt_cyber_sim.AttackerGoal(own_atleast_percent=args.ownership_goal),
         step_cost=args.step_cost,
@@ -399,49 +439,64 @@ def evaluate(args):
     if not hasattr(args, "eval_seed"):
         args.eval_seed = args.seed
 
-    eval_logs = evaluate_on_env_cyber(
-        args,
-        policy,
-        target_return=float(args.target_return),
-        max_ep_num=args.eval_episodes,
-        eval_max_steps=args.max_steps,
-        process_reward_fn=getattr(args, "_dt_process_reward_fn", None),
-    )
+    env_ids = _parse_env_ids(args)
+    per_env = {}
+    for eid in env_ids:
+        eval_logs = evaluate_on_env_cyber(
+            args,
+            policy,
+            target_return=float(args.target_return),
+            max_ep_num=args.eval_episodes,
+            eval_max_steps=args.max_steps,
+            process_reward_fn=getattr(args, "_dt_process_reward_fn", None),
+            env_id=eid,
+        )
 
-    er = eval_logs["episode_returns"]
-    el = eval_logs["episode_lens"]
-    ed = eval_logs["episode_done"]
-    results = [{"episode": i, "return": er[i], "len": el[i], "done": ed[i]} for i in range(len(er))]
+        er = eval_logs["episode_returns"]
+        el = eval_logs["episode_lens"]
+        ed = eval_logs["episode_done"]
+        results = [{"episode": i, "return": er[i], "len": el[i], "done": ed[i]} for i in range(len(er))]
+        summary = {
+            "time_sec": eval_logs["time/evaluation"],
+            "episodes": args.eval_episodes,
+            "mean_return": float(np.mean(er)) if er else 0.0,
+            "std_return": float(np.std(er)) if er else 0.0,
+            "mean_len": float(np.mean(el)) if el else 0.0,
+            "episodes_return_sum": eval_logs["episodes_return"],
+            "mean_return_per_episode": eval_logs["mean_return_per_episode"],
+            "episodes_done_early": eval_logs["episodes_done_early"],
+            "config": {
+                "env_id": eid,
+                "step_cost": args.step_cost,
+                "winning_reward": args.winning_reward,
+                "ownership_goal": args.ownership_goal,
+                "maximum_node_count": args.maximum_node_count,
+                "target_return": float(args.target_return),
+                "dt_process_reward": getattr(args, "_dt_process_reward_fn") is not None,
+                "alignment": getattr(args, "_eval_alignment", None),
+            },
+        }
+        per_env[eid] = {"summary": summary, "episodes": results}
+        print(f"[env={eid}] summary:", summary)
 
-    summary = {
-        "time_sec": eval_logs["time/evaluation"],
-        "episodes": args.eval_episodes,
-        "mean_return": float(np.mean(er)) if er else 0.0,
-        "std_return": float(np.std(er)) if er else 0.0,
-        "mean_len": float(np.mean(el)) if el else 0.0,
-        "episodes_return_sum": eval_logs["episodes_return"],
-        "mean_return_per_episode": eval_logs["mean_return_per_episode"],
-        "episodes_done_early": eval_logs["episodes_done_early"],
-        "config": {
-            "env_id": cfg.env_id,
-            "step_cost": args.step_cost,
-            "winning_reward": args.winning_reward,
-            "ownership_goal": args.ownership_goal,
-            "maximum_node_count": args.maximum_node_count,
-            "target_return": float(args.target_return),
-            "dt_process_reward": getattr(args, "_dt_process_reward_fn") is not None,
-            "alignment": getattr(args, "_eval_alignment", None),
-        },
-    }
+    aggregate = _aggregate_multi_env_eval(per_env)
 
     out_dir = cfg.results_dir
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"cyber_eval_seed_{args.seed}.json")
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump({"summary": summary, "episodes": results}, f, ensure_ascii=False, indent=2)
+        json.dump(
+            {
+                "aggregate": aggregate,
+                "per_env": per_env,
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
 
     print("Evaluation done.")
-    print("Summary:", summary)
+    print("Aggregate:", aggregate)
     print("Saved to:", out_path)
 
 
@@ -507,6 +562,18 @@ if __name__ == "__main__":
     p.add_argument("--winning-reward", type=int, default=cfg.winning_reward)
     p.add_argument("--ownership-goal", type=float, default=cfg.ownership_goal)
     p.add_argument("--maximum-node-count", type=int, default=cfg.maximum_node_count)
+    p.add_argument(
+        "--env-id",
+        type=str,
+        default=cfg.env_id,
+        help="Single environment id for evaluation (e.g. AptCyberBattleToyCtf-v0). Ignored when --env-ids is set.",
+    )
+    p.add_argument(
+        "--env-ids",
+        type=str,
+        default=None,
+        help="Comma-separated environment ids for multi-env evaluation. Example: AptCyberBattleToyCtf-v0,AptCyberBattleNode10V1-v0",
+    )
 
     p.add_argument(
         "--target-return",

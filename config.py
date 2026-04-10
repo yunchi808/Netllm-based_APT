@@ -29,6 +29,12 @@ PLM_DIR = os.path.join(_NETLLM_ROOT, "downloaded_plms")
 # Environment defaults (aligned with Learn-offline_rl_dataset_generator + gym registration)
 # ---------------------------------------------------------------------------
 ENV_ID = "AptCyberBattleToyCtf-v0"
+ENV_IDS = (
+    ENV_ID,
+    "AptCyberBattleNode10V1-v0",
+    "AptCyberBattleNode10V2-v0",
+    "AptCyberBattleNode10V3-v0",
+)
 STEP_COST = 1.0
 WINNING_REWARD = 300
 OWNERSHIP_GOAL = 0.6
@@ -72,6 +78,9 @@ def _default_exp_pool_paths() -> Dict[str, str]:
         "final": os.path.join(EXP_POOLS_DIR, "final_dataset.pkl"),
         "toyctf_sac2500": os.path.join(EXP_POOLS_DIR, "toyctf_sac2500_exp_pool.pkl"),
         "cyber_default": os.path.join(EXP_POOLS_DIR, "cyber_exp_pool.pkl"),
+        "dataset_v1": os.path.join(EXP_POOLS_DIR, "dataset_v1.pkl"),
+        "dataset_v2": os.path.join(EXP_POOLS_DIR, "dataset_v2.pkl"),
+        "dataset_v3": os.path.join(EXP_POOLS_DIR, "dataset_v3.pkl"),
     }
 
 
@@ -86,6 +95,7 @@ class Config:
     plm_dir = PLM_DIR
 
     env_id = ENV_ID
+    env_ids = list(ENV_IDS)
     step_cost = STEP_COST
     winning_reward = WINNING_REWARD
     ownership_goal = OWNERSHIP_GOAL
